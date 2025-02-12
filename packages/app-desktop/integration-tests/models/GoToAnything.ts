@@ -14,10 +14,7 @@ export default class GoToAnything {
 
 	public async open(electronApp: ElectronApplication) {
 		await this.mainScreen.waitFor();
-
-		if (!await activateMainMenuItem(electronApp, 'Goto Anything...')) {
-			throw new Error('Menu item for opening Goto Anything not found');
-		}
+		await activateMainMenuItem(electronApp, 'Goto Anything...');
 
 		return this.waitFor();
 	}
@@ -32,5 +29,17 @@ export default class GoToAnything {
 
 	public async expectToBeOpen() {
 		await expect(this.containerLocator).toBeAttached();
+	}
+
+	public async runCommand(electronApp: ElectronApplication, command: string) {
+		if (!command.startsWith(':')) {
+			command = `:${command}`;
+		}
+
+		await this.open(electronApp);
+		await this.inputLocator.fill(command);
+		await this.containerLocator.locator('.match-highlight').first().waitFor();
+		await this.inputLocator.press('Enter');
+		await this.expectToBeClosed();
 	}
 }

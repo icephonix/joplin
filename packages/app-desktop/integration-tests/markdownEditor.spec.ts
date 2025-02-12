@@ -3,23 +3,29 @@ import MainScreen from './models/MainScreen';
 import { join } from 'path';
 import getImageSourceSize from './util/getImageSourceSize';
 import setFilePickerResponse from './util/setFilePickerResponse';
+import activateMainMenuItem from './util/activateMainMenuItem';
 
 
 test.describe('markdownEditor', () => {
 	test('preview pane should render images in HTML notes', async ({ mainWindow, electronApp }) => {
-		const mainScreen = new MainScreen(mainWindow);
+		const mainScreen = await new MainScreen(mainWindow).setup();
 		await mainScreen.waitFor();
 
 		await mainScreen.importHtmlDirectory(electronApp, join(__dirname, 'resources', 'html-import'));
 		const importedFolder = mainScreen.sidebar.container.getByText('html-import');
 		await importedFolder.waitFor();
-		await importedFolder.click();
 
-		await mainScreen.noteList.focusContent(electronApp);
-		const importedHtmlFileItem = mainScreen.noteList.getNoteItemByTitle('test-html-file-with-image');
-		await importedHtmlFileItem.click();
+		// Retry -- focusing the imported-folder may fail in some cases
+		await expect(async () => {
+			await importedFolder.click();
 
-		const viewerFrame = mainScreen.noteEditor.getNoteViewerIframe();
+			await mainScreen.noteList.focusContent(electronApp);
+
+			const importedHtmlFileItem = mainScreen.noteList.getNoteItemByTitle('test-html-file-with-image');
+			await importedHtmlFileItem.click({ timeout: 300 });
+		}).toPass();
+
+		const viewerFrame = mainScreen.noteEditor.getNoteViewerFrameLocator();
 		// Should render headers
 		await expect(viewerFrame.locator('h1')).toHaveText('Test HTML file!');
 
@@ -30,7 +36,7 @@ test.describe('markdownEditor', () => {
 	});
 
 	test('preview pane should render PDFs', async ({ mainWindow, electronApp }) => {
-		const mainScreen = new MainScreen(mainWindow);
+		const mainScreen = await new MainScreen(mainWindow).setup();
 		await mainScreen.createNewNote('PDF attachments');
 		const editor = mainScreen.noteEditor;
 
@@ -39,7 +45,7 @@ test.describe('markdownEditor', () => {
 		await setFilePickerResponse(electronApp, [join(__dirname, 'resources', 'small-pdf.pdf')]);
 		await editor.attachFileButton.click();
 
-		const viewerFrame = mainScreen.noteEditor.getNoteViewerIframe();
+		const viewerFrame = mainScreen.noteEditor.getNoteViewerFrameLocator();
 		const pdfLink = viewerFrame.getByText('small-pdf.pdf');
 		await expect(pdfLink).toBeVisible();
 
@@ -75,7 +81,7 @@ test.describe('markdownEditor', () => {
 	});
 
 	test('preview pane should render video attachments', async ({ mainWindow, electronApp }) => {
-		const mainScreen = new MainScreen(mainWindow);
+		const mainScreen = await new MainScreen(mainWindow).setup();
 		await mainScreen.createNewNote('Media attachments');
 		const editor = mainScreen.noteEditor;
 
@@ -83,7 +89,7 @@ test.describe('markdownEditor', () => {
 		await setFilePickerResponse(electronApp, [join(__dirname, 'resources', 'video.mp4')]);
 		await editor.attachFileButton.click();
 
-		const videoLocator = editor.getNoteViewerIframe().locator('video');
+		const videoLocator = editor.getNoteViewerFrameLocator().locator('video');
 		const expectVideoToRender = async () => {
 			await expect(videoLocator).toBeSeekableMediaElement(6.9, 7);
 		};
@@ -99,7 +105,7 @@ test.describe('markdownEditor', () => {
 	});
 
 	test('arrow keys should navigate the toolbar', async ({ mainWindow }) => {
-		const mainScreen = new MainScreen(mainWindow);
+		const mainScreen = await new MainScreen(mainWindow).setup();
 		await mainScreen.waitFor();
 
 		await mainScreen.createNewNote('Note 1');
@@ -136,7 +142,7 @@ test.describe('markdownEditor', () => {
 	});
 
 	test('should sync local search between the viewer and editor', async ({ mainWindow }) => {
-		const mainScreen = new MainScreen(mainWindow);
+		const mainScreen = await new MainScreen(mainWindow).setup();
 		await mainScreen.waitFor();
 		const noteEditor = mainScreen.noteEditor;
 
@@ -149,7 +155,7 @@ test.describe('markdownEditor', () => {
 		await mainWindow.keyboard.press('Enter');
 		await mainWindow.keyboard.type('This is a test of search. `Test inline code`');
 
-		const viewer = noteEditor.getNoteViewerIframe();
+		const viewer = noteEditor.getNoteViewerFrameLocator();
 		await expect(viewer.locator('h1')).toHaveText('Testing');
 
 		const matches = viewer.locator('mark');
@@ -189,6 +195,40 @@ test.describe('markdownEditor', () => {
 		await noteEditor.toggleEditorLayoutButton.click();
 		await expect(noteEditor.codeMirrorEditor).toBeVisible();
 		await expect(noteEditor.editorSearchInput).not.toBeVisible();
+	});
+
+	test('should move focus when the visible editor panes change', async ({ mainWindow, electronApp }) => {
+		const mainScreen = await new MainScreen(mainWindow).setup();
+		await mainScreen.waitFor();
+		const noteEditor = mainScreen.noteEditor;
+
+		await mainScreen.createNewNote('Note');
+
+		await noteEditor.focusCodeMirrorEditor();
+		await mainWindow.keyboard.type('test');
+		const focusInMarkdownEditor = noteEditor.codeMirrorEditor.locator(':focus');
+		await expect(focusInMarkdownEditor).toBeAttached();
+
+		const toggleEditorLayout = () => activateMainMenuItem(electronApp, 'Toggle editor layout');
+
+		// Editor only
+		await toggleEditorLayout();
+		await expect(noteEditor.noteViewerContainer).not.toBeVisible();
+		// Markdown editor should be focused
+		await expect(focusInMarkdownEditor).toBeAttached();
+
+		// Viewer only
+		await toggleEditorLayout();
+		await expect(noteEditor.codeMirrorEditor).not.toBeVisible();
+		// Viewer should be focused
+		await expect(noteEditor.noteViewerContainer).toBeFocused();
+
+		// Viewer and editor
+		await toggleEditorLayout();
+		await expect(noteEditor.noteViewerContainer).toBeAttached();
+		await expect(noteEditor.codeMirrorEditor).toBeVisible();
+		// Editor should be focused
+		await expect(focusInMarkdownEditor).toBeAttached();
 	});
 });
 

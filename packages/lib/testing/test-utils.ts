@@ -286,6 +286,7 @@ async function switchClient(id: number, options: any = null) {
 	BaseItem.encryptionService_ = encryptionServices_[id];
 	Resource.encryptionService_ = encryptionServices_[id];
 	BaseItem.revisionService_ = revisionServices_[id];
+	ResourceFetcher.instance_ = resourceFetchers_[id];
 
 	await Setting.reset();
 	Setting.settingFilename = settingFilename(id);
@@ -297,7 +298,7 @@ async function switchClient(id: number, options: any = null) {
 	Setting.setConstant('pluginDir', pluginDir(id));
 	Setting.setConstant('isSubProfile', false);
 
-	await loadKeychainServiceAndSettings([options.keychainEnabled ? KeychainServiceDriverNode : KeychainServiceDriverDummy]);
+	await loadKeychainServiceAndSettings(options.keychainEnabled ? [KeychainServiceDriverNode] : []);
 
 	Setting.setValue('sync.target', syncTargetId());
 	Setting.setValue('sync.wipeOutFailSafe', false); // To keep things simple, always disable fail-safe unless explicitly set in the test itself
@@ -361,7 +362,7 @@ async function setupDatabase(id: number = null, options: any = null) {
 	if (databases_[id]) {
 		BaseModel.setDb(databases_[id]);
 		await clearDatabase(id);
-		await loadKeychainServiceAndSettings([options.keychainEnabled ? KeychainServiceDriverNode : KeychainServiceDriverDummy]);
+		await loadKeychainServiceAndSettings(options.keychainEnabled ? [KeychainServiceDriverNode] : []);
 		Setting.setValue('sync.target', syncTargetId());
 		return;
 	}
@@ -1022,21 +1023,23 @@ class TestApp extends BaseApplication {
 }
 
 const createTestShareData = (shareId: string): ShareState => {
+	const share = {
+		id: shareId,
+		folder_id: '',
+		master_key_id: '',
+		note_id: '',
+		type: 1,
+	};
+
 	return {
 		processingShareInvitationResponse: false,
-		shares: [],
+		shares: [share],
 		shareInvitations: [
 			{
 				id: '',
 				master_key: {},
 				status: 0,
-				share: {
-					id: shareId,
-					folder_id: '',
-					master_key_id: '',
-					note_id: '',
-					type: 1,
-				},
+				share,
 				can_read: 1,
 				can_write: 0,
 			},
@@ -1045,10 +1048,40 @@ const createTestShareData = (shareId: string): ShareState => {
 	};
 };
 
-const simulateReadOnlyShareEnv = (shareId: string, store?: Store) => {
+const mergeShareData = (state1: ShareState, state2: ShareState) => {
+	return {
+		...state1,
+		shares: [...state1.shares, ...state2.shares],
+		shareInvitations: [
+			...state1.shareInvitations,
+			...state2.shareInvitations,
+		],
+		shareUsers: {
+			...state1.shareUsers,
+			...state2.shareUsers,
+		},
+	};
+};
+
+const simulateReadOnlyShareEnv = (shareIds: string[]|string, store?: Store) => {
+	if (!Array.isArray(shareIds)) {
+		shareIds = [shareIds];
+	}
+
 	Setting.setValue('sync.target', 10);
 	Setting.setValue('sync.userId', 'abcd');
-	const shareData = createTestShareData(shareId);
+
+	// Create all shares
+	let shareData: ShareState|null = null;
+	for (const shareId of shareIds) {
+		const newShareData = createTestShareData(shareId);
+		if (!shareData) {
+			shareData = newShareData;
+		} else {
+			shareData = mergeShareData(shareData, newShareData);
+		}
+	}
+
 	BaseItem.syncShareCache = shareData;
 
 	if (store) {
@@ -1092,16 +1125,61 @@ export const mockMobilePlatform = (platform: string) => {
 	};
 };
 
-export const runWithFakeTimers = (callback: ()=> Promise<void>) => {
+// Waits for callback to not throw. Similar to react-native-testing-library's waitFor, but works better
+// with Joplin's mix of real and fake Jest timers.
+const realSetTimeout = setTimeout;
+export const waitFor = async (callback: ()=> Promise<void>) => {
+	const timeout = 10_000;
+	const startTime = performance.now();
+	let passed = false;
+	let lastError: Error|null = null;
+
+	while (!passed && performance.now() - startTime < timeout) {
+		try {
+			await callback();
+			passed = true;
+			lastError = null;
+		} catch (error) {
+			lastError = error;
+
+			await new Promise<void>(resolve => {
+				realSetTimeout(() => resolve(), 10);
+			});
+		}
+	}
+
+	if (lastError) {
+		throw lastError;
+	}
+};
+
+export const runWithFakeTimers = async (callback: ()=> Promise<void>) => {
 	if (typeof jest === 'undefined') {
 		throw new Error('Fake timers are only supported in jest.');
 	}
 
-	jest.useFakeTimers();
+	// advanceTimers: Needed by Joplin's database driver
+	jest.useFakeTimers({ advanceTimers: true });
+
+	// The shim.setTimeout and similar functions need to be changed to
+	// use fake timers.
+	const originalSetTimeout = shim.setTimeout;
+	const originalSetInterval = shim.setInterval;
+	const originalClearTimeout = shim.clearTimeout;
+	const originalClearInterval = shim.clearInterval;
+	shim.setTimeout = setTimeout;
+	shim.setInterval = setInterval;
+	shim.clearInterval = clearInterval;
+	shim.clearTimeout = clearTimeout;
+
 	try {
-		return callback();
+		return await callback();
 	} finally {
 		jest.runOnlyPendingTimers();
+		shim.setTimeout = originalSetTimeout;
+		shim.setInterval = originalSetInterval;
+		shim.clearTimeout = originalClearTimeout;
+		shim.clearInterval = originalClearInterval;
 		jest.useRealTimers();
 	}
 };

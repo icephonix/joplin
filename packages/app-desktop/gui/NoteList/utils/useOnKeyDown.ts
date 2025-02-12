@@ -122,7 +122,7 @@ const useOnKeyDown = (
 		}
 
 		if (noteIds.length) {
-			if (key === 'Delete' && event.shiftKey) {
+			if (key === 'Delete' && event.shiftKey || (key === 'Backspace' && event.metaKey && event.altKey)) {
 				event.preventDefault();
 				if (CommandService.instance().isEnabled('permanentlyDeleteNote')) {
 					void CommandService.instance().execute('permanentlyDeleteNote', noteIds);
@@ -153,7 +153,8 @@ const useOnKeyDown = (
 			announceForAccessibility(!wasCompleted ? _('Complete') : _('Incomplete'));
 		}
 
-		if (key === 'Tab') {
+		// Check for isDefaultPrevented to allow plugins to call .preventDefault
+		if (key === 'Enter' && !event.isDefaultPrevented()) {
 			event.preventDefault();
 
 			if (event.shiftKey) {

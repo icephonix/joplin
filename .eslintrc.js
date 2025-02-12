@@ -87,6 +87,7 @@ module.exports = {
 			allowEmptyReject: true,
 		}],
 		'no-throw-literal': ['error'],
+		'no-unused-expressions': ['error'],
 
 		// This rule should not be enabled since it matters in what order
 		// imports are done, in particular in relation to the shim.setReact
@@ -284,6 +285,14 @@ module.exports = {
 						format: null,
 						'filter': {
 							'regex': '^(GET|POST|PUT|DELETE|PATCH|HEAD|SQLite|PostgreSQL|ASC|DESC|E2EE|OR|AND|UNION|INTERSECT|EXCLUSION|INCLUSION|EUR|GBP|USD|SJCL.*|iOS)$',
+							'match': true,
+						},
+					},
+					{
+						selector: 'enumMember',
+						format: null,
+						'filter': {
+							'regex': '^(sha1|sha256|sha384|sha512|AES_128_GCM|AES_192_GCM|AES_256_GCM)$',
 							'match': true,
 						},
 					},

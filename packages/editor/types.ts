@@ -30,13 +30,18 @@ export enum EditorCommandType {
 	ToggleHeading4 = 'textHeading4',
 	ToggleHeading5 = 'textHeading5',
 
+	InsertHorizontalRule = 'textHorizontalRule',
+
 	// Find commands
+	ToggleSearch = 'textSearch',
 	ShowSearch = 'find',
 	HideSearch = 'hideSearchDialog',
 	FindNext = 'findNext',
 	FindPrevious = 'findPrev',
 	ReplaceNext = 'replace',
 	ReplaceAll = 'replaceAll',
+
+	EditLink = 'textLink',
 
 	// Editing and navigation commands
 	ScrollSelectionIntoView = 'scrollSelectionIntoView',
@@ -88,6 +93,7 @@ export interface ContentScriptData {
 // Intended to correspond with https://codemirror.net/docs/ref/#state.Transaction%5EuserEvent
 export enum UserEventSource {
 	Paste = 'input.paste',
+	Drop = 'input.drop',
 }
 
 export interface EditorControl {
@@ -150,6 +156,7 @@ export interface EditorSettings {
 	useExternalSearch: boolean;
 
 	automatchBraces: boolean;
+	autocompleteMarkup: boolean;
 
 	// True if internal command keyboard shortcuts should be ignored (thus
 	// allowing Joplin shortcuts to run).
@@ -158,12 +165,16 @@ export interface EditorSettings {
 	language: EditorLanguageType;
 
 	keymap: EditorKeymap;
+	tabMovesFocus: boolean;
 
+	markdownMarkEnabled: boolean;
 	katexEnabled: boolean;
 	spellcheckEnabled: boolean;
 	readOnly: boolean;
 
 	indentWithTabs: boolean;
+
+	editorLabel: string;
 }
 
 export type LogMessageCallback = (message: string)=> void;
@@ -171,9 +182,15 @@ export type OnEventCallback = (event: EditorEvent)=> void;
 export type PasteFileCallback = (data: File)=> Promise<void>;
 type OnScrollPastBeginningCallback = ()=> void;
 
+interface Localisations {
+	[editorString: string]: string;
+}
+
 export interface EditorProps {
 	settings: EditorSettings;
 	initialText: string;
+	// Used mostly for internal editor library strings
+	localisations?: Localisations;
 
 	// If null, paste and drag-and-drop will not work for resources unless handled elsewhere.
 	onPasteFile: PasteFileCallback|null;
