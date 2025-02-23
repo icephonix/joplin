@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useMemo, useRef, useEffect } from 'react';
+import { useMemo, useRef, useEffect, useCallback } from 'react';
 import { AppState } from '../../app.reducer';
 import BaseModel, { ModelType } from '@joplin/lib/BaseModel';
 import { Props } from './utils/types';
@@ -27,7 +27,9 @@ import { _ } from '@joplin/lib/locale';
 import useActiveDescendantId from './utils/useActiveDescendantId';
 import getNoteElementIdFromJoplinId from '../NoteListItem/utils/getNoteElementIdFromJoplinId';
 import useFocusVisible from './utils/useFocusVisible';
-const { connect } = require('react-redux');
+import { stateUtils } from '@joplin/lib/reducer';
+import { connect } from 'react-redux';
+import useOnNoteDoubleClick from './utils/useOnNoteDoubleClick';
 
 const commands = {
 	focusElementNoteList,
@@ -102,6 +104,8 @@ const NoteList = (props: Props) => {
 
 	const onNoteClick = useOnNoteClick(props.dispatch, focusNote);
 
+	const onNoteDoubleClick = useOnNoteDoubleClick();
+
 	const onKeyDown = useOnKeyDown(
 		activeNoteId,
 		props.selectedNoteIds,
@@ -114,6 +118,8 @@ const NoteList = (props: Props) => {
 		props.notes.length,
 		listRenderer.flow,
 		itemsPerLine,
+		props.showCompletedTodos,
+		props.uncompletedTodosOnTop,
 	);
 
 	useItemCss(listRenderer.itemCss);
@@ -197,7 +203,9 @@ const NoteList = (props: Props) => {
 
 	const renderEmptyList = () => {
 		if (props.notes.length) return null;
-		return <div className="emptylist">{getEmptyFolderMessage(props.folders, props.selectedFolderId)}</div>;
+		// Role status is necessary for the screenreader to announce that the list is empty, since when there are
+		// zero items there is not list to render
+		return <div className="emptylist" role="status">{getEmptyFolderMessage(props.folders, props.selectedFolderId)}</div>;
 	};
 
 	const renderFiller = (key: string, style: React.CSSProperties) => {
@@ -225,6 +233,7 @@ const NoteList = (props: Props) => {
 					itemSize={itemSize}
 					onChange={listRenderer.onChange}
 					onClick={onNoteClick}
+					onDoubleClick={onNoteDoubleClick}
 					onContextMenu={onItemContextMenu}
 					onDragStart={onDragStart}
 					onDragOver={onDragOver}
@@ -275,12 +284,19 @@ const NoteList = (props: Props) => {
 		return output;
 	}, [listRenderer.flow]);
 
+	const onContainerContextMenu = useCallback((event: React.MouseEvent) => {
+		const isFromKeyboard = event.button === -1;
+		if (event.isDefaultPrevented() || !isFromKeyboard) return;
+		onItemContextMenu({ itemId: activeNoteId });
+	}, [onItemContextMenu, activeNoteId]);
+
+	const hasNotes = !!props.notes.length;
 	return (
 		<div
-			role='listbox'
-			aria-label={_('Notes')}
-			aria-activedescendant={getNoteElementIdFromJoplinId(activeNoteId)}
-			aria-multiselectable={true}
+			role={hasNotes ? 'listbox' : 'group'}
+			aria-label={hasNotes ? _('Notes') : null}
+			aria-activedescendant={activeNoteId ? getNoteElementIdFromJoplinId(activeNoteId) : undefined}
+			aria-multiselectable={hasNotes ? true : undefined}
 			tabIndex={0}
 
 			onFocus={onFocus}
@@ -293,6 +309,8 @@ const NoteList = (props: Props) => {
 			onKeyDown={onKeyDown}
 			onKeyUp={onKeyUp}
 			onDrop={onDrop}
+			onContextMenu={onContainerContextMenu}
+			id='notes-list'
 		>
 			{renderEmptyList()}
 			{renderFiller('top', topFillerStyle)}
@@ -304,19 +322,24 @@ const NoteList = (props: Props) => {
 	);
 };
 
-const mapStateToProps = (state: AppState) => {
+interface ConnectProps {
+	windowId: string;
+}
+
+const mapStateToProps = (state: AppState, ownProps: ConnectProps) => {
 	const selectedFolder: FolderEntity = state.notesParentType === 'Folder' ? Folder.byId(state.folders, state.selectedFolderId) : null;
 	const userId = state.settings['sync.userId'];
+	const windowState = stateUtils.windowStateById(state, ownProps.windowId);
 
 	return {
-		notes: state.notes,
+		notes: windowState.notes,
 		folders: state.folders,
-		selectedNoteIds: state.selectedNoteIds,
-		selectedFolderId: state.selectedFolderId,
+		selectedNoteIds: windowState.selectedNoteIds,
+		selectedFolderId: windowState.selectedFolderId,
 		themeId: state.settings.theme,
 		notesParentType: state.notesParentType,
 		searches: state.searches,
-		selectedSearchId: state.selectedSearchId,
+		selectedSearchId: windowState.selectedSearchId,
 		watchedNoteFiles: state.watchedNoteFiles,
 		provisionalNoteIds: state.provisionalNoteIds,
 		isInsertingNotes: state.isInsertingNotes,
@@ -325,7 +348,7 @@ const mapStateToProps = (state: AppState) => {
 		showCompletedTodos: state.settings.showCompletedTodos,
 		highlightedWords: state.highlightedWords,
 		plugins: state.pluginService.plugins,
-		customCss: state.customCss,
+		customCss: state.customViewerCss,
 		focusedField: state.focusedField,
 		parentFolderIsReadOnly: state.notesParentType === 'Folder' && selectedFolder ? itemIsReadOnlySync(ModelType.Folder, ItemChange.SOURCE_UNSPECIFIED, selectedFolder as ItemSlice, userId, state.shareService) : false,
 		selectedFolderInTrash: itemIsInTrash(selectedFolder),

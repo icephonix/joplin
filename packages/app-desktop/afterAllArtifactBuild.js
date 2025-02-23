@@ -7,7 +7,7 @@ const distPath = path.join(__dirname, distDirName);
 
 const generateChecksumFile = () => {
 	if (os.platform() !== 'linux') {
-		return []; // SHA-512 is only for AppImage
+		return; // SHA-512 is only for AppImage
 	}
 
 	let appImageName = '';
@@ -28,11 +28,13 @@ const generateChecksumFile = () => {
 	const sha512FileName = `${appImageName}.sha512`;
 	const sha512FilePath = path.join(distPath, sha512FileName);
 	fs.writeFileSync(sha512FilePath, checksum);
-	return [sha512FilePath];
+	return sha512FilePath;
 };
 
 const mainHook = () => {
-	generateChecksumFile();
+	const sha512FilePath = generateChecksumFile();
+	const outputFiles = [sha512FilePath].filter(item => item);
+	return outputFiles;
 };
 
 exports.default = mainHook;

@@ -6,8 +6,9 @@ import { classHighlighter } from '@lezer/highlight';
 
 import {
 	EditorView, drawSelection, highlightSpecialChars, ViewUpdate, Command, rectangularSelection,
+	dropCursor,
 } from '@codemirror/view';
-import { history, undoDepth, redoDepth, standardKeymap } from '@codemirror/commands';
+import { history, undoDepth, redoDepth, standardKeymap, insertTab } from '@codemirror/commands';
 
 import { keymap, KeyBinding } from '@codemirror/view';
 import { searchKeymap } from '@codemirror/search';
@@ -32,6 +33,19 @@ import handlePasteEvent from './utils/handlePasteEvent';
 import biDirectionalTextExtension from './utils/biDirectionalTextExtension';
 import searchExtension from './utils/searchExtension';
 import isCursorAtBeginning from './utils/isCursorAtBeginning';
+import overwriteModeExtension from './utils/overwriteModeExtension';
+import handleLinkEditRequests, { showLinkEditor } from './utils/handleLinkEditRequests';
+import selectedNoteIdExtension, { setNoteIdEffect } from './utils/selectedNoteIdExtension';
+
+// Newer versions of CodeMirror by default use Chrome's EditContext API.
+// While this might be stable enough for desktop use, it causes significant
+// problems on Android:
+// - https://github.com/codemirror/dev/issues/1450
+// - https://github.com/codemirror/dev/issues/1451
+// For now, CodeMirror allows disabling EditContext to work around these issues:
+// https://discuss.codemirror.net/t/experimental-support-for-editcontext/8144/3
+type ExtendedEditorView = typeof EditorView & { EDIT_CONTEXT: boolean };
+(EditorView as ExtendedEditorView).EDIT_CONTEXT = false;
 
 const createEditor = (
 	parentElement: HTMLElement, props: EditorProps,
@@ -83,12 +97,6 @@ const createEditor = (
 
 			schedulePostUndoRedoDepthChange(editor);
 		}
-	};
-
-	const notifyLinkEditRequest = () => {
-		props.onEvent({
-			kind: EditorEventType.EditLink,
-		});
 	};
 
 
@@ -172,12 +180,23 @@ const createEditor = (
 		keyCommand('Mod-`', toggleCode),
 		keyCommand('Mod-[', decreaseIndent),
 		keyCommand('Mod-]', increaseIndent),
-		keyCommand('Mod-k', (_: EditorView) => {
-			notifyLinkEditRequest();
-			return true;
-		}),
-		keyCommand('Tab', insertOrIncreaseIndent, true),
+		keyCommand('Mod-k', showLinkEditor),
+		keyCommand('Tab', (view: EditorView) => {
+			if (settings.tabMovesFocus) {
+				return false;
+			}
+
+			if (settings.autocompleteMarkup) {
+				return insertOrIncreaseIndent(view);
+			}
+			// Use the default indent behavior (which doesn't adjust markup)
+			return insertTab(view);
+		}, true),
 		keyCommand('Shift-Tab', (view) => {
+			if (settings.tabMovesFocus) {
+				return false;
+			}
+
 			// When at the beginning of the editor, allow shift-tab to act
 			// normally.
 			if (isCursorAtBeginning(view.state)) {
@@ -253,7 +272,14 @@ const createEditor = (
 
 				// Apply styles to entire lines (block-display decorations)
 				decoratorExtension,
+				dropCursor(),
+
 				biDirectionalTextExtension,
+				overwriteModeExtension,
+
+				selectedNoteIdExtension,
+
+				props.localisations ? EditorState.phrases.of(props.localisations) : [],
 
 				// Adds additional CSS classes to tokens (the default CSS classes are
 				// auto-generated and thus unstable).
@@ -266,11 +292,20 @@ const createEditor = (
 					notifySelectionFormattingChange(viewUpdate);
 				}),
 
+				handleLinkEditRequests(() => {
+					props.onEvent({
+						kind: EditorEventType.EditLink,
+					});
+				}),
 			],
 			doc: initialText,
 		}),
 		parent: parentElement,
 	});
+
+	editor.dispatch(editor.state.update({
+		effects: setNoteIdEffect.of(props.initialNoteId),
+	}));
 
 	const editorControls = new CodeMirrorControl(editor, {
 		onClearHistory: () => {
